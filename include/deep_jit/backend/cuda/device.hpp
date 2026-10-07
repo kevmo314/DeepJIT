@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <utility>
 
@@ -30,7 +31,19 @@ class Device {
     bool initialized = false;
 
 public:
+    // Device properties to report when there is no GPU, for ahead-of-time compilation
+    // (e.g., on CPU-only build machines). Ignored while a GPU is visible.
+    static inline std::optional<cudaDeviceProp> emulated;
+
     const cudaDeviceProp& get_prop() {
+        if (not initialized and emulated.has_value()) {
+            int num_devices = 0;
+            if (cudaGetDeviceCount(&num_devices) != cudaSuccess or num_devices == 0) {
+                (void) cudaGetLastError();
+                prop = *emulated;
+                initialized = true;
+            }
+        }
         if (not initialized) {
             // `cudaFree(nullptr)` is to ensure the current CUDA context exists before later driver API calls
             int device_index = 0;
