@@ -32,13 +32,16 @@ inline void* kernel_arg_pointer(const T& value) {
 }
 
 // Immutable CUDA kernel handles with shared ownership. Driver resources are
-// unloaded when the last shared owner is destroyed.
+// unloaded when the last shared owner is destroyed. The kernel is a CUkernel,
+// which isn't tied to a context: a CUfunction is (the one current when it was
+// got), so launching one on another GPU fails with CUDA_ERROR_INVALID_HANDLE.
+// Launches resolve the CUkernel in the current context instead.
 class Kernel {
 public:
     CUlibrary library_handle{};
-    CUfunction kernel_handle{};
+    CUkernel kernel_handle{};
 
-    Kernel(const CUlibrary& library_handle, const CUfunction& kernel_handle)
+    Kernel(const CUlibrary& library_handle, const CUkernel& kernel_handle)
         : library_handle(library_handle), kernel_handle(kernel_handle) {}
 
     ~Kernel() { unload(); }
@@ -68,7 +71,7 @@ public:
 
         // Load kernel
         CUlibrary library_handle{};
-        CUfunction kernel_handle{};
+        CUkernel kernel_handle{};
         DJ_CUDA_DRIVER_CHECK(driver::lazy_cuLibraryLoadData(
             &library_handle, data.data(), nullptr, nullptr, 0, nullptr, nullptr, 0));
         try {
@@ -77,9 +80,7 @@ public:
             if (num_kernels != 1)
                 DJ_PANIC("expected exactly one kernel in {}", cubin_path.string());
 
-            CUkernel library_kernel_handle{};
-            DJ_CUDA_DRIVER_CHECK(driver::lazy_cuLibraryEnumerateKernels(&library_kernel_handle, 1, library_handle));
-            DJ_CUDA_DRIVER_CHECK(driver::lazy_cuKernelGetFunction(&kernel_handle, library_kernel_handle));
+            DJ_CUDA_DRIVER_CHECK(driver::lazy_cuLibraryEnumerateKernels(&kernel_handle, 1, library_handle));
         } catch (...) {
             driver::lazy_cuLibraryUnload(library_handle);
             throw;
@@ -117,11 +118,15 @@ public:
         DJ_HOST_ASSERT(launch_options.cluster_dim->y == 1 and launch_options.cluster_dim->z == 1,
                        "only one-dimensional CUDA clusters are supported");
 
+        // Attributes are per device: the current context's
+        CUdevice device{};
+        DJ_CUDA_DRIVER_CHECK(driver::lazy_cuCtxGetDevice(&device));
+
         // Set **maximum** dynamic shared memory
         if (*launch_options.num_smem_bytes > 0) {
-            DJ_CUDA_DRIVER_CHECK(driver::lazy_cuFuncSetAttribute(
-                kernel_handle, CU_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES,
-                *launch_options.num_smem_bytes));
+            DJ_CUDA_DRIVER_CHECK(driver::lazy_cuKernelSetAttribute(
+                CU_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES,
+                *launch_options.num_smem_bytes, kernel_handle, device));
         }
 
         // Set non-portable cluster size
@@ -131,8 +136,8 @@ public:
         // But, we still write this, because the launch overhead is important
         // And for `= true`'s side-effects for `= false` can be ignored
         if (*launch_options.nonportable_cluster_size_allowed) {
-            DJ_CUDA_DRIVER_CHECK(driver::lazy_cuFuncSetAttribute(
-                kernel_handle, CU_FUNC_ATTRIBUTE_NON_PORTABLE_CLUSTER_SIZE_ALLOWED, 1));
+            DJ_CUDA_DRIVER_CHECK(driver::lazy_cuKernelSetAttribute(
+                CU_FUNC_ATTRIBUTE_NON_PORTABLE_CLUSTER_SIZE_ALLOWED, 1, kernel_handle, device));
         }
 
         // NOTES: please enlarge the array size if you want more attributes
@@ -171,8 +176,9 @@ public:
             : get_current_cuda_stream(torch::stable::accelerator::getCurrentDeviceIndex());
         config.attrs = num_attributes == 0 ? nullptr : attributes.data();
         config.numAttrs = num_attributes;
+        // A CUkernel launches as a CUfunction of the current context
         DJ_CUDA_DRIVER_CHECK(driver::lazy_cuLaunchKernelEx(
-            &config, kernel_handle, sizeof...(Args) == 0 ? nullptr : kernel_arg_ptrs, nullptr));
+            &config, reinterpret_cast<CUfunction>(kernel_handle), sizeof...(Args) == 0 ? nullptr : kernel_arg_ptrs, nullptr));
     }
 
     void unload() noexcept {

@@ -1562,6 +1562,35 @@ bool test_multiple_device_runtimes(const fs::path& cache_root) {
         DJ_HOST_ASSERT(launch_value(*runtime_0, kernel_0, 3) == 24);
         DJ_CUDA_RUNTIME_CHECK(cudaSetDevice(1));
         DJ_HOST_ASSERT(launch_value(*runtime_1, kernel_1, 4) == 25);
+
+        // One runtime's kernel, loaded with device 0 current, launches on
+        // whichever device is current (as one process-wide runtime serves
+        // every GPU): the loaded kernel isn't tied to the context it was
+        // loaded in.
+        DJ_HOST_ASSERT(launch_value(*runtime_0, kernel_0, 5) == 26,
+                       "a kernel loaded on device 0 did not launch on device 1");
+        // With a per-device attribute set at launch (dynamic shared memory).
+        const int num_smem_bytes = runtime_0->device.get_num_smem_bytes();
+        DJ_CUDA_RUNTIME_CHECK(cudaSetDevice(0));
+        const auto smem_kernel =
+            runtime_0->compile("large_dynamic_shared_memory", get_source("large_dynamic_shared_memory.cu"));
+        for (const int device : {0, 1, 0}) {
+            DJ_CUDA_RUNTIME_CHECK(cudaSetDevice(device));
+            int* output = nullptr;
+            DJ_CUDA_RUNTIME_CHECK(cudaMalloc(reinterpret_cast<void**>(&output), sizeof(int)));
+            runtime_0->launch(
+                smem_kernel, {
+                    .num_smem_bytes = num_smem_bytes,
+                    .grid_dim = dim3(1, 1, 1),
+                    .block_dim = dim3(32, 1, 1),
+                },
+                output, 40 + device, num_smem_bytes / static_cast<int>(sizeof(int)));
+            DJ_CUDA_RUNTIME_CHECK(cudaDeviceSynchronize());
+            int result = 0;
+            DJ_CUDA_RUNTIME_CHECK(cudaMemcpy(&result, output, sizeof(int), cudaMemcpyDeviceToHost));
+            DJ_CUDA_RUNTIME_CHECK(cudaFree(output));
+            DJ_HOST_ASSERT(result == 40 + device, "device {} launch returned {}", device, result);
+        }
     } catch (...) {
         cudaSetDevice(original_device);
         unset_env("MULTI_DEVICE_JIT_CACHE_DIR");

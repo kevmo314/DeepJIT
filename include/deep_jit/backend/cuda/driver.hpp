@@ -15,7 +15,6 @@ DJ_DECL_LAZY_DL_FUNCTION(get_cuda_handle, cuGetErrorName);
 DJ_DECL_LAZY_DL_FUNCTION(get_cuda_handle, cuGetErrorString);
 DJ_DECL_LAZY_DL_FUNCTION(get_cuda_handle, cuDeviceGet);
 DJ_DECL_LAZY_DL_FUNCTION(get_cuda_handle, cuDeviceGetAttribute);
-DJ_DECL_LAZY_DL_FUNCTION(get_cuda_handle, cuFuncSetAttribute);
 DJ_DECL_LAZY_DL_FUNCTION(get_cuda_handle, cuLaunchKernelEx);
 DJ_DECL_LAZY_DL_FUNCTION(get_cuda_handle, cuStreamBatchMemOp);
 DJ_DECL_LAZY_DL_FUNCTION(get_cuda_handle, cuTensorMapEncodeTiled);
@@ -23,7 +22,8 @@ DJ_DECL_LAZY_DL_FUNCTION(get_cuda_handle, cuLibraryLoadData)
 DJ_DECL_LAZY_DL_FUNCTION(get_cuda_handle, cuLibraryUnload)
 DJ_DECL_LAZY_DL_FUNCTION(get_cuda_handle, cuLibraryGetKernelCount)
 DJ_DECL_LAZY_DL_FUNCTION(get_cuda_handle, cuLibraryEnumerateKernels)
-DJ_DECL_LAZY_DL_FUNCTION(get_cuda_handle, cuKernelGetFunction)
+DJ_DECL_LAZY_DL_FUNCTION(get_cuda_handle, cuKernelSetAttribute)
+DJ_DECL_LAZY_DL_FUNCTION(get_cuda_handle, cuCtxGetDevice)
 
 // VMM operations
 DJ_DECL_LAZY_DL_FUNCTION(get_cuda_handle, cuMemAddressFree)
